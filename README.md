@@ -3,13 +3,11 @@
 A modern, user-friendly desktop application for downloading YouTube videos and playlists with quality selection and download management features.
 
 ```
-Cross-platform YouTube downloader with a modern dark-themed GUI. Download single videos or entire playlists, 
+YouTube video downloader with a modern dark-themed GUI. Download single videos or entire playlists, 
 choose quality, track progress, and play videos directly from the app.
 ```
 
 ![Python](https://img.shields.io/badge/python-3.7+-blue.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
 
 ## ✨ Features
 
