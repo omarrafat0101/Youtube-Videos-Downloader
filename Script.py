@@ -53,6 +53,10 @@ class VideoDownloader:
             'fragment_retries': 10,
             'skip_unavailable_fragments': True,
             'progress_hooks': [self._progress_hook],
+            'postprocessors': [{
+            'key': 'FFmpegMetadata',
+            'add_metadata': True,
+        }],
         }
 
         while self.retry_count < self.max_retries and not self.cancelled:
