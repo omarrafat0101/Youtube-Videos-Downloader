@@ -8,13 +8,14 @@ import sys
 from pathlib import Path
 
 class VideoDownloader:
-    def __init__(self, video_info, download_path, quality, progress_callback, status_callback, complete_callback):
+    def __init__(self, video_info, download_path, quality, progress_callback, status_callback, complete_callback, use_numbering=False):
         self.video_info = video_info
         self.download_path = download_path
         self.quality = quality
         self.progress_callback = progress_callback
         self.status_callback = status_callback
         self.complete_callback = complete_callback
+        self.use_numbering = use_numbering
         self.cancelled = False
         self.paused = False
         self.thread = None
@@ -28,7 +29,6 @@ class VideoDownloader:
 
     def _download_video(self):
         video_url = self.video_info['url']
-        video_title = self.video_info['title']
         
         # Quality format selection without merging
         if self.quality == "Best":
@@ -42,21 +42,36 @@ class VideoDownloader:
         else:  # 360p
             format_option = 'best[height<=360][ext=mp4]/best[height<=360]'
 
+        # Build output template — prefix with index if numbering is enabled
+        if self.use_numbering and 'index' in self.video_info:
+            idx = self.video_info['index']
+            out_template = os.path.join(self.download_path, f"{idx:02d}. %(title)s.%(ext)s")
+        else:
+            out_template = os.path.join(self.download_path, '%(title)s.%(ext)s')
+
         ydl_opts = {
             'format': format_option,
-            'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
+            'outtmpl': out_template,
             'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
+            'quiet': False,
+            'no_warnings': False,
+            'verbose': True,
             'socket_timeout': 30,
             'retries': 10,
             'fragment_retries': 10,
             'skip_unavailable_fragments': True,
             'progress_hooks': [self._progress_hook],
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-us,en;q=0.5',
+                'Sec-Fetch-Mode': 'navigate',
+            },
             'postprocessors': [{
-            'key': 'FFmpegMetadata',
-            'add_metadata': True,
-        }],
+                'key': 'FFmpegMetadata',
+                'add_metadata': True,
+            }],
         }
 
         while self.retry_count < self.max_retries and not self.cancelled:
@@ -118,13 +133,16 @@ class PlaylistDownloaderApp:
     def __init__(self, root):
         self.root = root
         self.root.title("YouTube Video/Playlist Downloader")
-        self.root.geometry("800x700")
+        self.root.geometry("800x720")
         self.root.configure(bg='#1e1e2e')
         self.root.resizable(False, False)
 
         self.videos = []
         self.downloaders = {}
         self.download_path = str(Path.home() / "Downloads" / "YouTube")
+
+        # Numbering option variable
+        self.numbering_var = tk.BooleanVar(value=False)
         
         self.setup_ui()
 
@@ -168,12 +186,29 @@ class PlaylistDownloaderApp:
         tk.Label(input_frame, text="Quality:", font=('Segoe UI', 10), 
                 bg='#1e1e2e', fg='#cdd6f4').grid(row=2, column=0, sticky='w', pady=5)
         
+        quality_row = tk.Frame(input_frame, bg='#1e1e2e')
+        quality_row.grid(row=2, column=1, sticky='w', padx=10, pady=5)
+
         self.quality_var = tk.StringVar(value="720p")
-        quality_combo = ttk.Combobox(input_frame, textvariable=self.quality_var, 
+        quality_combo = ttk.Combobox(quality_row, textvariable=self.quality_var, 
                                      values=["Best", "1080p", "720p", "480p", "360p"],
                                      font=('Segoe UI', 10), width=15, state='readonly')
-        quality_combo.grid(row=2, column=1, sticky='w', padx=10, pady=5)
-        
+        quality_combo.pack(side=tk.LEFT)
+
+        # ── Numbering checkbox (same row as quality) ──────────────────────────
+        numbering_check = tk.Checkbutton(
+            quality_row,
+            text="Number videos in playlist  (e.g. 01. Title.mp4)",
+            variable=self.numbering_var,
+            font=('Segoe UI', 9),
+            bg='#1e1e2e', fg='#cdd6f4',
+            selectcolor='#313244',
+            activebackground='#1e1e2e', activeforeground='#cdd6f4',
+            relief=tk.FLAT, cursor='hand2'
+        )
+        numbering_check.pack(side=tk.LEFT, padx=(20, 0))
+        # ──────────────────────────────────────────────────────────────────────
+
         # Buttons Frame
         btn_frame = tk.Frame(input_frame, bg='#1e1e2e')
         btn_frame.grid(row=3, column=1, sticky='w', pady=10)
@@ -246,24 +281,25 @@ class PlaylistDownloaderApp:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 
-                # Check if it's a playlist or a single video
                 if 'entries' in info:
-                    # It's a playlist
+                    # Playlist — store 1-based index on each entry
                     entries = info['entries']
-                    for entry in entries:
+                    for i, entry in enumerate(entries, start=1):
                         if entry:
                             video_info = {
                                 'title': entry.get('title', 'Unknown'),
                                 'url': f"https://www.youtube.com/watch?v={entry.get('id', '')}",
-                                'id': entry.get('id', '')
+                                'id': entry.get('id', ''),
+                                'index': i,          # ← playlist position
                             }
                             self.videos.append(video_info)
                 else:
-                    # It's a single video
+                    # Single video — index 1
                     video_info = {
                         'title': info.get('title', 'Unknown'),
                         'url': url,
-                        'id': info.get('id', '')
+                        'id': info.get('id', ''),
+                        'index': 1,
                     }
                     self.videos.append(video_info)
             
@@ -288,7 +324,6 @@ class PlaylistDownloaderApp:
         
         self.download_all_btn.config(state=tk.NORMAL)
         
-        # Display count
         count_label = tk.Label(self.videos_frame, 
                               text=f"Found {len(self.videos)} video(s)", 
                               font=('Segoe UI', 10, 'bold'), 
@@ -302,22 +337,18 @@ class PlaylistDownloaderApp:
         row_frame = tk.Frame(self.videos_frame, bg='#313244', relief=tk.FLAT, bd=1)
         row_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        # Video title
         title_text = f"{idx + 1}. {video['title'][:80]}"
         title_label = tk.Label(row_frame, text=title_text, font=('Segoe UI', 9), 
                               bg='#313244', fg='#cdd6f4', anchor='w')
         title_label.grid(row=0, column=0, sticky='w', padx=10, pady=5, columnspan=3)
         
-        # Progress bar
         progress = ttk.Progressbar(row_frame, length=300, mode='determinate')
         progress.grid(row=1, column=0, padx=10, pady=5)
         
-        # Status label
         status_label = tk.Label(row_frame, text="Ready", font=('Segoe UI', 8), 
                                bg='#313244', fg='#a6adc8', width=20)
         status_label.grid(row=1, column=1, padx=5)
         
-        # Buttons frame
         btn_frame = tk.Frame(row_frame, bg='#313244')
         btn_frame.grid(row=1, column=2, padx=10)
         
@@ -339,7 +370,6 @@ class PlaylistDownloaderApp:
                             relief=tk.FLAT, padx=10, pady=3)
         play_btn.pack(side=tk.LEFT, padx=2)
         
-        # Store references
         video['progress'] = progress
         video['status_label'] = status_label
 
@@ -363,7 +393,8 @@ class PlaylistDownloaderApp:
         
         downloader = VideoDownloader(
             video, self.download_path, self.quality_var.get(),
-            progress_callback, status_callback, complete_callback
+            progress_callback, status_callback, complete_callback,
+            use_numbering=self.numbering_var.get()   # ← pass the checkbox state
         )
         self.downloaders[video['id']] = downloader
         downloader.download()
@@ -373,29 +404,32 @@ class PlaylistDownloaderApp:
             self.downloaders[video['id']].cancel()
 
     def play_video(self, video):
-        # Find the downloaded video file
-        video_title = video['title']
-        # Clean the title to match the filename
         import re
+        video_title = video['title']
         clean_title = re.sub(r'[\\/*?:"<>|]', "", video_title)
-        
-        # Look for the video file with common extensions
+
+        # Build candidate filenames (with and without number prefix)
+        idx = video.get('index', 1)
+        numbered_prefix = f"{idx:02d}. "
         extensions = ['.mp4', '.webm', '.mkv', '.m4a']
         video_path = None
-        
+
         for ext in extensions:
-            potential_path = os.path.join(self.download_path, f"{clean_title}{ext}")
-            if os.path.exists(potential_path):
-                video_path = potential_path
+            # Try numbered filename first, then plain
+            for name in [f"{numbered_prefix}{clean_title}{ext}", f"{clean_title}{ext}"]:
+                candidate = os.path.join(self.download_path, name)
+                if os.path.exists(candidate):
+                    video_path = candidate
+                    break
+            if video_path:
                 break
         
-        if video_path and os.path.exists(video_path):
-            # Open with default video player
+        if video_path:
             if sys.platform == 'win32':
                 os.startfile(video_path)
-            elif sys.platform == 'darwin':  # macOS
+            elif sys.platform == 'darwin':
                 subprocess.run(['open', video_path])
-            else:  # Linux
+            else:
                 subprocess.run(['xdg-open', video_path])
         else:
             messagebox.showinfo("Info", "Video not found. Please download it first.")
